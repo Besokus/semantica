@@ -240,3 +240,31 @@ def test_validate_relations_handles_malformed_without_crashing() -> None:
     # Filtering also drops the malformed one instead of crashing.
     kept = SchemaValidator(_schema()).filter_relations_by_schema([good, bad])
     assert kept == [good]
+
+
+def test_from_ontology_folds_endpoint_types_like_from_owl() -> None:
+    # pkupt's case: an endpoint type (Org) that didn't clear the class-frequency
+    # gate is absent from "classes" but referenced in a property's range. Both
+    # constructors must agree that (Person, worksFor, Org) is allowed.
+    ont = {
+        "classes": [{"name": "Person"}],
+        "properties": [{"name": "worksFor", "domain": ["Person"], "range": ["Org"]}],
+    }
+    dict_schema = ExtractionSchema.from_ontology(ont)
+    assert {"Person", "Org"} <= dict_schema.concepts
+    assert dict_schema.allows_relation("Person", "worksFor", "Org")
+
+    ttl = """
+    @prefix : <https://example.org/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+    :Person a owl:Class .
+    :worksFor a owl:ObjectProperty ;
+        rdfs:domain :Person ;
+        rdfs:range :Org .
+    """
+    owl_schema = ExtractionSchema.from_owl(ttl, format="turtle")
+    assert owl_schema.allows_relation(
+        "Person", "worksFor", "Org"
+    ) == dict_schema.allows_relation("Person", "worksFor", "Org")

@@ -112,6 +112,11 @@ class ExtractionSchema:
         concepts and ``ontology["properties"]`` (each carrying a ``name`` and
         optional ``domain`` / ``range``) as predicates. Missing ``domain`` /
         ``range`` means unconstrained; unrecognised keys are ignored.
+
+        Endpoint types named in a property's ``domain`` / ``range`` are also folded
+        into the concept set (consistent with :meth:`from_owl`), so a type referenced
+        only as an endpoint — e.g. one that didn't clear the class-frequency gate
+        during induction — is still a known concept.
         """
         concepts: Set[str] = set()
         for c in ontology.get("classes", []) or []:
@@ -126,11 +131,14 @@ class ExtractionSchema:
             name = p.get("name") or p.get("label")
             if not name:
                 continue
+            domain = _constraint_set(p.get("domain"))
+            rng = _constraint_set(p.get("range"))
             predicates[str(name)] = Predicate(
                 name=str(name),
-                domain=frozenset(_constraint_set(p.get("domain"))),
-                range=frozenset(_constraint_set(p.get("range"))),
+                domain=frozenset(domain),
+                range=frozenset(rng),
             )
+            concepts |= domain | rng
         return cls(concepts=frozenset(concepts), predicates=predicates)
 
     @classmethod
