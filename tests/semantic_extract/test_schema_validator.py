@@ -185,3 +185,58 @@ def test_composes_with_extraction_validator_same_shape() -> None:
     conformance = SchemaValidator(_schema()).validate_entities(entities)
     assert isinstance(confidence, ValidationResult)
     assert isinstance(conformance, ValidationResult)
+
+
+# --------------------------------------------------------------------------- #
+# Robustness fixes surfaced in review
+# --------------------------------------------------------------------------- #
+
+
+def test_owl_thing_domain_range_is_unconstrained() -> None:
+    # OntologyGenerator emits owl:Thing when it cannot resolve endpoint types;
+    # it must behave as "any concept", not a literal {"Thing"} constraint.
+    ont = {
+        "classes": [{"name": "Person"}, {"name": "Organization"}],
+        "properties": [
+            {"name": "relatedTo", "domain": ["owl:Thing"], "range": ["owl:Thing"]}
+        ],
+    }
+    schema = ExtractionSchema.from_ontology(ont)
+    assert schema.predicates["relatedTo"].domain == frozenset()
+    assert schema.predicates["relatedTo"].range == frozenset()
+    assert schema.allows_relation("Person", "relatedTo", "Organization")
+
+
+def test_from_owl_prefers_rdfs_label_and_supports_rdfs_class() -> None:
+    ttl = """
+    @prefix : <https://example.org/> .
+    @prefix owl: <http://www.w3.org/2002/07/owl#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+    :Cls1 a owl:Class ; rdfs:label "Person" .
+    :Org a rdfs:Class .
+    :worksAt a owl:ObjectProperty ;
+        rdfs:domain :Cls1 ;
+        rdfs:range :Org .
+    """
+    schema = ExtractionSchema.from_owl(ttl, format="turtle")
+    # rdfs:label wins over the URI suffix "Cls1"
+    assert "Person" in schema.concepts
+    assert "Cls1" not in schema.concepts
+    # rdfs:Class is picked up too
+    assert "Org" in schema.concepts
+    assert schema.predicates["worksAt"].domain == frozenset({"Person"})
+
+
+def test_validate_relations_handles_malformed_without_crashing() -> None:
+    # A relation missing an endpoint must be reported, not raise AttributeError.
+    good = Relation(subject=_person(), predicate="worksAt", object=_org())
+    bad = Relation(subject=_person(), predicate="worksAt", object=None)  # type: ignore[arg-type]
+    result = SchemaValidator(_schema()).validate_relations([good, bad])
+    assert isinstance(result, ValidationResult)
+    assert not result.valid
+    assert result.metrics["malformed"] == 1
+    assert result.metrics["conforming"] == 1
+    # Filtering also drops the malformed one instead of crashing.
+    kept = SchemaValidator(_schema()).filter_relations_by_schema([good, bad])
+    assert kept == [good]

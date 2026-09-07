@@ -52,6 +52,30 @@ def _as_name_set(value: Any) -> Set[str]:
     return {str(value)}
 
 
+_OWL_THING = {
+    "owl:Thing",
+    "Thing",
+    "http://www.w3.org/2002/07/owl#Thing",
+}
+
+
+def _drop_thing(names: Set[str]) -> Set[str]:
+    """Collapse an ``owl:Thing`` domain / range to *unconstrained* (empty set).
+
+    ``owl:Thing`` is the universal class, so a property whose ``domain`` / ``range``
+    is ``owl:Thing`` places no restriction. ``OntologyGenerator`` emits it as the
+    fallback when it cannot resolve endpoint types; keeping it as a literal
+    ``{"Thing"}`` constraint would reject every real endpoint, so we treat its
+    presence as "any concept".
+    """
+    return set() if names & _OWL_THING else names
+
+
+def _constraint_set(value: Any) -> Set[str]:
+    """A ``domain`` / ``range`` constraint set, with ``owl:Thing`` meaning unconstrained."""
+    return _drop_thing(_as_name_set(value))
+
+
 @dataclass(frozen=True)
 class Predicate:
     """An allowed predicate with optional ``domain`` / ``range`` constraints.
@@ -66,7 +90,14 @@ class Predicate:
 
 @dataclass
 class ExtractionSchema:
-    """Read-only view over a domain ontology used to gate extraction."""
+    """Read-only view over a domain ontology used to gate extraction.
+
+    Names are matched **exactly**: the schema vocabulary and the extraction labels
+    must share a normalization convention. ``OntologyGenerator`` normalizes concept
+    names to PascalCase and predicate names to camelCase, so entity labels /
+    relation predicates validated against a generated schema should follow the same
+    convention (e.g. label entities ``Person`` rather than ``person``).
+    """
 
     concepts: FrozenSet[str] = field(default_factory=frozenset)
     predicates: Dict[str, Predicate] = field(default_factory=dict)
@@ -97,8 +128,8 @@ class ExtractionSchema:
                 continue
             predicates[str(name)] = Predicate(
                 name=str(name),
-                domain=frozenset(_as_name_set(p.get("domain"))),
-                range=frozenset(_as_name_set(p.get("range"))),
+                domain=frozenset(_constraint_set(p.get("domain"))),
+                range=frozenset(_constraint_set(p.get("range"))),
             )
         return cls(concepts=frozenset(concepts), predicates=predicates)
 
@@ -108,10 +139,12 @@ class ExtractionSchema:
     ) -> "ExtractionSchema":
         """Build a schema from an OWL / RDF file path or serialized string.
 
-        ``owl:Class`` becomes a concept; ``owl:ObjectProperty`` with
-        ``rdfs:domain`` / ``rdfs:range`` becomes a predicate (and its domain /
-        range names are folded into the concept set). Requires ``rdflib`` (an
-        existing project dependency).
+        ``owl:Class`` / ``rdfs:Class`` become concepts; ``owl:ObjectProperty`` with
+        ``rdfs:domain`` / ``rdfs:range`` becomes a predicate (its domain / range
+        names are folded into the concept set, with ``owl:Thing`` treated as
+        unconstrained). Names prefer an explicit ``rdfs:label``, falling back to the
+        URI's local name, so the vocabulary matches :meth:`from_ontology`. Requires
+        ``rdflib`` (an existing project dependency).
         """
         from rdflib import OWL, RDF, RDFS, Graph, URIRef
 
@@ -128,16 +161,23 @@ class ExtractionSchema:
                     text = text.rsplit(sep, 1)[-1]
             return text
 
+        def _name_of(term: Any) -> str:
+            label = graph.value(term, RDFS.label)
+            return str(label) if label is not None else _local(term)
+
         concepts: Set[str] = {
-            _local(c)
-            for c in graph.subjects(RDF.type, OWL.Class)
+            _name_of(c)
+            for class_type in (OWL.Class, RDFS.Class)
+            for c in graph.subjects(RDF.type, class_type)
             if isinstance(c, URIRef)
         }
         predicates: Dict[str, Predicate] = {}
         for prop in graph.subjects(RDF.type, OWL.ObjectProperty):
-            name = _local(prop)
-            domain = {_local(d) for d in graph.objects(prop, RDFS.domain)}
-            rng = {_local(r) for r in graph.objects(prop, RDFS.range)}
+            name = _name_of(prop)
+            domain = _drop_thing(
+                {_name_of(d) for d in graph.objects(prop, RDFS.domain)}
+            )
+            rng = _drop_thing({_name_of(r) for r in graph.objects(prop, RDFS.range)})
             predicates[name] = Predicate(
                 name=name, domain=frozenset(domain), range=frozenset(rng)
             )
@@ -162,6 +202,10 @@ class ExtractionSchema:
         True iff subject and object are known concepts, the predicate is known,
         and subject / object satisfy the predicate's ``domain`` / ``range``
         (an empty ``domain`` / ``range`` allows any concept).
+
+        Membership is exact; ``subClassOf`` hierarchies are not traversed, so a
+        subclass endpoint is not accepted for a superclass ``domain`` / ``range``
+        (subclass-aware validation is a possible follow-up).
         """
         if subject_label not in self.concepts or object_label not in self.concepts:
             return False

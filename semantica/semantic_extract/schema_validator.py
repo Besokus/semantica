@@ -116,17 +116,24 @@ class SchemaValidator:
         errors: List[str] = []
         warnings: List[str] = []
 
+        # Guard malformed relations (missing subject/object) before dereferencing
+        # their endpoints, matching ExtractionValidator's own leniency.
+        malformed = [r for r in relations if not r.subject or not r.object]
+        well_formed = [r for r in relations if r.subject and r.object]
+
         unknown_predicate = [
-            r for r in relations if not self.schema.has_predicate(r.predicate)
+            r for r in well_formed if not self.schema.has_predicate(r.predicate)
         ]
         dr_violation = [
             r
-            for r in relations
+            for r in well_formed
             if self.schema.has_predicate(r.predicate)
             and not self.schema.allows_relation(
                 r.subject.label, r.predicate, r.object.label
             )
         ]
+        if malformed:
+            errors.append(f"{len(malformed)} relations missing a subject or object")
         if unknown_predicate:
             preds = sorted({r.predicate for r in unknown_predicate})
             errors.append(
@@ -139,10 +146,11 @@ class SchemaValidator:
             )
 
         total = len(relations)
-        conforming = total - len(unknown_predicate) - len(dr_violation)
+        conforming = total - len(malformed) - len(unknown_predicate) - len(dr_violation)
         metrics = {
             "total_relations": total,
             "conforming": conforming,
+            "malformed": len(malformed),
             "unknown_predicate": len(unknown_predicate),
             "domain_range_violation": len(dr_violation),
             "schema_predicates": len(self.schema.predicates),
@@ -167,7 +175,9 @@ class SchemaValidator:
         return [
             r
             for r in relations
-            if self.schema.has_predicate(r.predicate)
+            if r.subject
+            and r.object
+            and self.schema.has_predicate(r.predicate)
             and self.schema.allows_relation(
                 r.subject.label, r.predicate, r.object.label
             )
