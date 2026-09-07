@@ -105,8 +105,12 @@ class ExtractionSchema:
     # ---- constructors -------------------------------------------------
 
     @classmethod
-    def from_ontology(cls, ontology: Mapping[str, Any]) -> "ExtractionSchema":
-        """Build a schema from a ``generate_ontology``-style dict.
+    def from_ontology(cls, ontology: Any) -> "ExtractionSchema":
+        """Build a schema from a ``generate_ontology``-style ontology.
+
+        Accepts the mapping returned by :func:`semantica.ontology.generate_ontology`,
+        or an object exposing such a mapping via a ``.data`` attribute — e.g. the
+        ``OntologyData`` returned by ``semantica.ingest.OntologyIngestor``.
 
         Reads ``ontology["classes"]`` (each carrying a ``name`` / ``label``) as
         concepts and ``ontology["properties"]`` (each carrying a ``name`` and
@@ -118,6 +122,9 @@ class ExtractionSchema:
         only as an endpoint — e.g. one that didn't clear the class-frequency gate
         during induction — is still a known concept.
         """
+        if not isinstance(ontology, Mapping) and hasattr(ontology, "data"):
+            ontology = ontology.data  # unwrap OntologyData-like objects
+
         concepts: Set[str] = set()
         for c in ontology.get("classes", []) or []:
             name = (c.get("name") or c.get("label")) if isinstance(c, Mapping) else c

@@ -268,3 +268,15 @@ def test_from_ontology_folds_endpoint_types_like_from_owl() -> None:
     assert owl_schema.allows_relation(
         "Person", "worksFor", "Org"
     ) == dict_schema.allows_relation("Person", "worksFor", "Org")
+
+
+def test_from_ontology_accepts_ontologydata_like_object() -> None:
+    # semantica.ingest.OntologyIngestor.ingest_ontology returns an OntologyData
+    # whose ontology dict is held in `.data`; from_ontology should unwrap it
+    # instead of raising AttributeError on `.get()`.
+    from types import SimpleNamespace
+
+    wrapped = SimpleNamespace(data=ONTOLOGY)
+    schema = ExtractionSchema.from_ontology(wrapped)
+    assert schema.concepts == frozenset({"Person", "Organization", "City"})
+    assert "worksAt" in schema.predicates
