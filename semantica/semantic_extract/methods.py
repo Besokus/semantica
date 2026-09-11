@@ -136,8 +136,38 @@ except ImportError:
 logger = get_logger("methods")
 
 # Initialize global result cache
+def _build_cache_backend():
+    """Select a cache backend from config.
+
+    Returns ``None`` (ExtractionCache's default in-memory backend) unless a
+    persistent backend is requested. Any failure to construct the persistent
+    backend degrades gracefully to the in-memory default so extraction never
+    breaks because of a cache misconfiguration.
+    """
+    backend_kind = str(config.get("cache_backend", "memory") or "memory").lower()
+    if backend_kind == "sqlite":
+        import os
+        import tempfile
+
+        from .cache import SqliteCacheBackend
+
+        path = config.get("cache_path") or os.path.join(
+            tempfile.gettempdir(), "semantica_extract_cache.sqlite3"
+        )
+        try:
+            return SqliteCacheBackend(path, max_size=config.get("cache_size", 1000))
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.warning(
+                f"Failed to init sqlite cache backend at {path!r} "
+                f"({exc}); falling back to in-memory cache."
+            )
+    return None
+
+
 _result_cache = ExtractionCache(
-    ttl=config.get("cache_ttl", 3600)
+    max_size=config.get("cache_size", 1000),
+    ttl=config.get("cache_ttl", 3600),
+    backend=_build_cache_backend(),
 )
 if not config.get("cache_enabled", True):
     _result_cache.enabled = False

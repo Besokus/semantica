@@ -127,6 +127,11 @@ _LAZY_EXPORTS: Dict[str, Tuple[str, str]] = {
     # Config
     "Config": (".config", "Config"),
     "config": (".config", "config"),
+    # Cache
+    "ExtractionCache": (".cache", "ExtractionCache"),
+    "CacheBackend": (".cache", "CacheBackend"),
+    "InMemoryBackend": (".cache", "InMemoryBackend"),
+    "SqliteCacheBackend": (".cache", "SqliteCacheBackend"),
     # Methods
     "get_entity_method": (".methods", "get_entity_method"),
     "get_relation_method": (".methods", "get_relation_method"),
@@ -217,6 +222,11 @@ __all__ = [
     # Config
     "Config",
     "config",
+    # Cache
+    "ExtractionCache",
+    "CacheBackend",
+    "InMemoryBackend",
+    "SqliteCacheBackend",
     # Methods
     "get_entity_method",
     "get_relation_method",

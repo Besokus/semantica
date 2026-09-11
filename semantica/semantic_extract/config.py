@@ -58,6 +58,12 @@ class Config:
         self._configs["optimization"] = {
             "enable_cache": True,
             "cache_size": 1000,
+            "cache_ttl": 3600,
+            # Cache backend: "memory" (default, in-process) or "sqlite"
+            # (persistent, survives restarts). cache_path is the sqlite file
+            # location; None lets the caller pick a default.
+            "cache_backend": "memory",
+            "cache_path": None,
             "max_workers": 8,
             "enable_batching": True,
             "batch_size": 10,
